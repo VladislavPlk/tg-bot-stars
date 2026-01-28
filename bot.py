@@ -11,6 +11,7 @@ from aiogram.client.default import DefaultBotProperties
 
 
 # Настройки
+#BOT_TOKEN = "8087779382:AAGkNBW1_uMsI2IKNFQUTVEJ8ryALb1aED4"
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = -1002259252156  # ID канала для подписки
 ADMIN_CHANNEL_ID = -1002395805594  # ID канала для заявок
@@ -38,7 +39,8 @@ def init_db():
     cur = conn.cursor()
 
     cur.execute('''CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+        user_id BIGINT,
         username TEXT,
         balance INTEGER DEFAULT 0,
         referrals INTEGER DEFAULT 0,
@@ -46,8 +48,8 @@ def init_db():
     )''')
 
     cur.execute('''CREATE TABLE IF NOT EXISTS withdrawals (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id BIGINT,
         amount INTEGER,
         status TEXT DEFAULT 'pending',
         date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
