@@ -1,4 +1,6 @@
 import asyncio
+import psycopg2
+import os
 import sqlite3
 import logging
 from aiogram import Bot, Dispatcher, types, F
@@ -7,8 +9,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.client.default import DefaultBotProperties
 
+
 # Настройки
-BOT_TOKEN = "8087779382:AAGkNBW1_uMsI2IKNFQUTVEJ8ryALb1aED4"
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = -1002259252156  # ID канала для подписки
 ADMIN_CHANNEL_ID = -1002395805594  # ID канала для заявок
 ADMIN_IDS = [1098000915]  # ID администраторов
@@ -26,8 +29,12 @@ channel_username_cache = None
 
 
 # Инициализация БД
+def get_conn():
+    return psycopg2.connect(os.environ["DATABASE_URL"])
+
+
 def init_db():
-    conn = sqlite3.connect('bot.db')
+    conn = get_conn()
     cur = conn.cursor()
 
     cur.execute('''CREATE TABLE IF NOT EXISTS users (
@@ -47,6 +54,7 @@ def init_db():
     )''')
 
     conn.commit()
+    cur.close()
     conn.close()
 
 
@@ -144,24 +152,24 @@ async def start_handler(message: types.Message):
             # Если не число, игнорируем
             pass
 
-    conn = sqlite3.connect('bot.db')
+    conn = get_conn()
     cur = conn.cursor()
 
-    cur.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+    cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
     user_exists = cur.fetchone()
 
     if not user_exists:
-        cur.execute("INSERT INTO users (user_id, username) VALUES (?, ?)",
+        cur.execute("INSERT INTO users (user_id, username) VALUES (%s, %s)",
                     (user_id, message.from_user.username))
 
         # Начисление звёзд рефереру (ИЗМЕНЕНО: 2 звезды вместо 1)
         if referrer_id and referrer_id != user_id:
             # Проверяем существует ли реферер
-            cur.execute("SELECT * FROM users WHERE user_id = ?", (referrer_id,))
+            cur.execute("SELECT * FROM users WHERE user_id = %s", (referrer_id,))
             if cur.fetchone():
-                cur.execute("UPDATE users SET balance = balance + ?, referrals = referrals + 1 WHERE user_id = ?",
+                cur.execute("UPDATE users SET balance = balance + %s, referrals = referrals + 1 WHERE user_id = %s",
                             (REFERRAL_REWARD, referrer_id))
-                cur.execute("UPDATE users SET invited_by = ? WHERE user_id = ?",
+                cur.execute("UPDATE users SET invited_by = %s WHERE user_id = %s",
                             (referrer_id, user_id))
 
     conn.commit()
@@ -210,9 +218,9 @@ async def profile_handler(message: types.Message):
         await message.answer("Сначала подпишитесь на канал!")
         return
 
-    conn = sqlite3.connect('bot.db')
+    conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT balance, referrals FROM users WHERE user_id = ?",
+    cur.execute("SELECT balance, referrals FROM users WHERE user_id = %s",
                 (message.from_user.id,))
     result = cur.fetchone()
     conn.close()
@@ -245,12 +253,9 @@ async def referral_handler(message: types.Message):
     #alt_link = f"https://t.me/{bot_info.username}?start=ref{user_id}"
 
     await message.answer(
-        f"🔗 Ваши реферальные ссылки: {standard_link}\n"
-       # f"• Основная: {standard_link}\n"
-       # f"• Для iOS: {alt_link}\n\n"
+        f"🔗 Ваша реферальная ссылка: {standard_link}\n"
         f"📋 <b>Инструкция:</b>\n"
         f"• Поделитесь ссылкой со своими друзьями!!!\n"
-        #f"• На iOS: попробуйте вторую ссылку\n\n"
         f"💎 <b>Вы получаете {REFERRAL_REWARD} звезды за каждого приглашенного друга!</b>",
     )
 
@@ -265,18 +270,18 @@ async def ref_code_handler(message: types.Message):
             referrer_id = int(args[1])
             user_id = message.from_user.id
 
-            conn = sqlite3.connect('bot.db')
+            conn = get_conn()
             cur = conn.cursor()
 
             # Проверяем не регистрировался ли уже пользователь
-            cur.execute("SELECT invited_by FROM users WHERE user_id = ?", (user_id,))
+            cur.execute("SELECT invited_by FROM users WHERE user_id = %s", (user_id,))
             result = cur.fetchone()
 
             if result and result[0] is None:
                 # Начисляем звёзды рефереру (ИЗМЕНЕНО: 2 звезды вместо 1)
-                cur.execute("UPDATE users SET balance = balance + ?, referrals = referrals + 1 WHERE user_id = ?",
+                cur.execute("UPDATE users SET balance = balance + %s, referrals = referrals + 1 WHERE user_id = %s",
                             (REFERRAL_REWARD, referrer_id))
-                cur.execute("UPDATE users SET invited_by = ? WHERE user_id = ?",
+                cur.execute("UPDATE users SET invited_by = %s WHERE user_id = %s",
                             (referrer_id, user_id))
                 conn.commit()
 
@@ -307,9 +312,9 @@ async def withdraw_handler(message: types.Message):
         await message.answer("Сначала подпишитесь на канал!")
         return
 
-    conn = sqlite3.connect('bot.db')
+    conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT balance FROM users WHERE user_id = ?", (message.from_user.id,))
+    cur.execute("SELECT balance FROM users WHERE user_id = %s", (message.from_user.id,))
     result = cur.fetchone()
     conn.close()
 
@@ -336,9 +341,9 @@ async def withdraw_amount_handler(message: types.Message):
     amount = amount_map[message.text]
     user_id = message.from_user.id
 
-    conn = sqlite3.connect('bot.db')
+    conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+    cur.execute("SELECT balance FROM users WHERE user_id = %s", (user_id,))
     result = cur.fetchone()
 
     if not result:
@@ -351,9 +356,9 @@ async def withdraw_amount_handler(message: types.Message):
         await message.answer("❌ Недостаточно звёзд для вывода!", reply_markup=get_main_menu())
         return
 
-    cur.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amount, user_id))
-    cur.execute("INSERT INTO withdrawals (user_id, amount) VALUES (?, ?)", (user_id, amount))
-    withdrawal_id = cur.lastrowid
+    cur.execute("UPDATE users SET balance = balance - %s WHERE user_id = %s", (amount, user_id))
+    cur.execute("INSERT INTO withdrawals (user_id, amount) VALUES (%s, %s) RETURNING id", (user_id, amount))
+    withdrawal_id = cur.fetchone()[0]
     conn.commit()
     conn.close()
 
@@ -390,11 +395,11 @@ async def approve_withdrawal_handler(callback: types.CallbackQuery):
 
     withdrawal_id = int(callback.data.split("_")[1])
 
-    conn = sqlite3.connect('bot.db')
+    conn = get_conn()
     cur = conn.cursor()
 
     # Получаем информацию о заявке
-    cur.execute("SELECT user_id, amount, status FROM withdrawals WHERE id = ?", (withdrawal_id,))
+    cur.execute("SELECT user_id, amount, status FROM withdrawals WHERE id = %s", (withdrawal_id,))
     withdrawal = cur.fetchone()
 
     if not withdrawal:
@@ -408,10 +413,10 @@ async def approve_withdrawal_handler(callback: types.CallbackQuery):
         return
 
     # Обновляем статус заявки
-    cur.execute("UPDATE withdrawals SET status = 'approved' WHERE id = ?", (withdrawal_id,))
+    cur.execute("UPDATE withdrawals SET status = 'approved' WHERE id = %s", (withdrawal_id,))
 
     # Получаем информацию о пользователе
-    cur.execute("SELECT username FROM users WHERE user_id = ?", (user_id,))
+    cur.execute("SELECT username FROM users WHERE user_id = %s", (user_id,))
     user_result = cur.fetchone()
     username = user_result[0] if user_result else "Неизвестно"
 
@@ -453,11 +458,11 @@ async def reject_withdrawal_handler(callback: types.CallbackQuery):
 
     withdrawal_id = int(callback.data.split("_")[1])
 
-    conn = sqlite3.connect('bot.db')
+    conn = get_conn()
     cur = conn.cursor()
 
     # Получаем информацию о заявке
-    cur.execute("SELECT user_id, amount, status FROM withdrawals WHERE id = ?", (withdrawal_id,))
+    cur.execute("SELECT user_id, amount, status FROM withdrawals WHERE id = %s", (withdrawal_id,))
     withdrawal = cur.fetchone()
 
     if not withdrawal:
@@ -471,11 +476,11 @@ async def reject_withdrawal_handler(callback: types.CallbackQuery):
         return
 
     # Возвращаем звезды пользователю и обновляем статус
-    cur.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, user_id))
-    cur.execute("UPDATE withdrawals SET status = 'rejected' WHERE id = ?", (withdrawal_id,))
+    cur.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s", (amount, user_id))
+    cur.execute("UPDATE withdrawals SET status = 'rejected' WHERE id = %s", (withdrawal_id,))
 
     # Получаем информацию о пользователе
-    cur.execute("SELECT username FROM users WHERE user_id = ?", (user_id,))
+    cur.execute("SELECT username FROM users WHERE user_id = %s", (user_id,))
     user_result = cur.fetchone()
     username = user_result[0] if user_result else "Неизвестно"
 
@@ -515,9 +520,9 @@ async def back_handler(message: types.Message):
 
 @dp.message(F.text == "📋 История выводов")
 async def history_handler(message: types.Message):
-    conn = sqlite3.connect('bot.db')
+    conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT amount, status, date FROM withdrawals WHERE user_id = ? ORDER BY id DESC LIMIT 10",
+    cur.execute("SELECT amount, status, date FROM withdrawals WHERE user_id = %s ORDER BY id DESC LIMIT 10",
                 (message.from_user.id,))
     history = cur.fetchall()
     conn.close()
@@ -551,7 +556,7 @@ async def admin_withdrawals_handler(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
 
-    conn = sqlite3.connect('bot.db')
+    conn = get_conn()
     cur = conn.cursor()
 
     # Получаем ожидающие заявки
@@ -602,7 +607,7 @@ async def admin_stats_handler(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
 
-    conn = sqlite3.connect('bot.db')
+    conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM users")
     total_users = cur.fetchone()[0]
@@ -685,7 +690,7 @@ async def admin_actions_handler(message: types.Message):
 
     if state == "admin_broadcast":
         # Начинаем рассылку
-        conn = sqlite3.connect('bot.db')
+        conn = get_conn()
         cur = conn.cursor()
         cur.execute("SELECT user_id FROM users")
         users = cur.fetchall()
@@ -742,15 +747,15 @@ async def admin_actions_handler(message: types.Message):
             identifier = data[0]
             amount = int(data[1])
 
-            conn = sqlite3.connect('bot.db')
+            conn = get_conn()
             cur = conn.cursor()
 
             if identifier.startswith('@'):
-                cur.execute("UPDATE users SET balance = balance + ? WHERE username = ?",
+                cur.execute("UPDATE users SET balance = balance + %s WHERE username = %s",
                             (amount, identifier[1:]))
                 target = identifier
             else:
-                cur.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?",
+                cur.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s",
                             (amount, int(identifier)))
                 target = f"ID {identifier}"
 
