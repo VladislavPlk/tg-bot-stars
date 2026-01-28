@@ -39,7 +39,7 @@ def init_db():
     cur = conn.cursor()
 
     cur.execute('''CREATE TABLE IF NOT EXISTS users (
-        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
         user_id BIGINT,
         username TEXT,
         balance INTEGER DEFAULT 0,
