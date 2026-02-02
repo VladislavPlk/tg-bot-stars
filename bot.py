@@ -158,16 +158,17 @@ async def start_handler(message: types.Message):
     cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
     user_exists = cur.fetchone()
 
-    if not user_exists:
-        cur.execute("INSERT INTO users (user_id, username) VALUES (%s, %s)",
-                    (user_id, message.from_user.username))
+    cur.execute("SELECT 1 FROM users WHERE user_id = %s", (user_id,))
+    user_exists = cur.fetchone()
 
-        # Начисление звёзд рефереру (ИЗМЕНЕНО: 2 звезды вместо 1)
-        if not user_exists:
-            cur.execute(
-                "INSERT INTO users (user_id, username, invited_by) VALUES (%s, %s, %s)",
-                (user_id, message.from_user.username, referrer_id)
-            )
+    if not user_exists:
+        cur.execute(
+            """
+            INSERT INTO users (user_id, username, invited_by)
+            VALUES (%s, %s, %s)
+            """,
+            (user_id, message.from_user.username, referrer_id)
+        )
 
     conn.commit()
     conn.close()
@@ -295,52 +296,6 @@ async def referral_handler(message: types.Message):
         f"• Поделитесь ссылкой со своими друзьями!!!\n"
         f"💎 <b>Вы получаете {REFERRAL_REWARD} звезды за каждого приглашенного друга!</b>",
     )
-
-
-# Альтернативный метод для iOS - команда с реферальным кодом
-@dp.message(Command("ref"))
-async def ref_code_handler(message: types.Message):
-    args = message.text.split()
-    if len(args) > 1:
-        # Обработка реферального кода через команду /ref
-        try:
-            referrer_id = int(args[1])
-            user_id = message.from_user.id
-
-            conn = get_conn()
-            cur = conn.cursor()
-
-            # Проверяем не регистрировался ли уже пользователь
-            cur.execute("SELECT invited_by FROM users WHERE user_id = %s", (user_id,))
-            result = cur.fetchone()
-
-            if result and result[0] is None:
-                # Начисляем звёзды рефереру (ИЗМЕНЕНО: 2 звезды вместо 1)
-                cur.execute("UPDATE users SET balance = balance + %s, referrals = referrals + 1 WHERE user_id = %s",
-                            (REFERRAL_REWARD, referrer_id))
-                cur.execute("UPDATE users SET invited_by = %s WHERE user_id = %s",
-                            (referrer_id, user_id))
-                conn.commit()
-
-                await message.answer(
-                    f"✅ Реферальный код применен! Вы помогли другу получить +{REFERRAL_REWARD} звезды!")
-            else:
-                await message.answer("ℹ️ Вы уже использовали реферальный код ранее.")
-
-            conn.close()
-
-        except ValueError:
-            await message.answer("❌ Неверный формат реферального кода.")
-    else:
-        # Показываем реферальный код пользователя
-        user_id = message.from_user.id
-        await message.answer(
-            f"📋 Ваш реферальный код: <code>{user_id}</code>\n\n"
-            f"Друг может использовать команду:\n"
-            f"<code>/ref {user_id}</code>\n\n"
-            f"Или перейти по вашей реферальной ссылке из меню.\n\n"
-            f"💎 За каждого приглашенного друга вы получите {REFERRAL_REWARD} звезды!"
-        )
 
 
 @dp.message(F.text == "💎 Вывод звёзд")
