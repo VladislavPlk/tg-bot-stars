@@ -1,7 +1,6 @@
 import asyncio
 import psycopg2
 import os
-import sqlite3
 import logging
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -11,7 +10,6 @@ from aiogram.client.default import DefaultBotProperties
 
 
 # Настройки
-#BOT_TOKEN = "8087779382:AAGkNBW1_uMsI2IKNFQUTVEJ8ryALb1aED4"
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = -1002259252156  # ID канала для подписки
 ADMIN_CHANNEL_ID = -1002395805594  # ID канала для заявок
@@ -165,14 +163,11 @@ async def start_handler(message: types.Message):
                     (user_id, message.from_user.username))
 
         # Начисление звёзд рефереру (ИЗМЕНЕНО: 2 звезды вместо 1)
-        if referrer_id and referrer_id != user_id:
-            # Проверяем существует ли реферер
-            cur.execute("SELECT * FROM users WHERE user_id = %s", (referrer_id,))
-            if cur.fetchone():
-                cur.execute("UPDATE users SET balance = balance + %s, referrals = referrals + 1 WHERE user_id = %s",
-                            (REFERRAL_REWARD, referrer_id))
-                cur.execute("UPDATE users SET invited_by = %s WHERE user_id = %s",
-                            (referrer_id, user_id))
+        if not user_exists:
+            cur.execute(
+                "INSERT INTO users (user_id, username, invited_by) VALUES (%s, %s, %s)",
+                (user_id, message.from_user.username, referrer_id)
+            )
 
     conn.commit()
     conn.close()
@@ -202,10 +197,8 @@ async def start_handler(message: types.Message):
 @dp.callback_query(F.data == "check_subscription")
 async def check_subscription_handler(callback: types.CallbackQuery):
     if await check_subscription(callback.from_user.id):
-        await callback.message.edit_text(
-            "✅ Отлично! Теперь вы можете использовать все функции бота:",
-            reply_markup=None
-        )
+        await try_count_referral(callback.from_user.id)
+        await callback.message.edit_text("✅ Подписка подтверждена!")
         await callback.message.answer(
             "Выберите действие:",
             reply_markup=get_main_menu()
@@ -214,8 +207,50 @@ async def check_subscription_handler(callback: types.CallbackQuery):
         await callback.answer("Вы еще не подписались на канал!", show_alert=True)
 
 
+# Начисление звезд(новое)
+async def try_count_referral(user_id: int):
+    if not await check_subscription(user_id):
+        return
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT invited_by, referral_counted
+        FROM users
+        WHERE user_id = %s
+    """, (user_id,))
+    row = cur.fetchone()
+
+    if not row:
+        conn.close()
+        return
+
+    invited_by, counted = row
+
+    if invited_by and not counted and invited_by != user_id:
+        cur.execute("""
+            UPDATE users
+            SET balance = balance + %s,
+                referrals = referrals + 1
+            WHERE user_id = %s
+        """, (REFERRAL_REWARD, invited_by))
+
+        cur.execute("""
+            UPDATE users
+            SET referral_counted = TRUE
+            WHERE user_id = %s
+        """, (user_id,))
+
+        conn.commit()
+
+    conn.close()
+
+
 @dp.message(F.text == "📊 Профиль")
 async def profile_handler(message: types.Message):
+    await try_count_referral(message.from_user.id)
+
     if not await check_subscription(message.from_user.id):
         await message.answer("Сначала подпишитесь на канал!")
         return
@@ -769,6 +804,13 @@ async def admin_actions_handler(message: types.Message):
 
         except Exception as e:
             await message.answer("❌ Ошибка формата! Используйте: @username количество или user_id количество")
+
+
+# Фоллбэк
+@dp.message()
+async def fallback_handler(message: types.Message):
+    await try_count_referral(message.from_user.id)
+
 
 
 async def main():
