@@ -155,13 +155,16 @@ async def start_handler(message: types.Message):
     conn = get_conn()
     cur = conn.cursor()
 
-    cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
-    user_exists = cur.fetchone()
 
-    cur.execute("SELECT 1 FROM users WHERE user_id = %s", (user_id,))
-    user_exists = cur.fetchone()
+    # получаем invited_by, если пользователь уже есть
+    cur.execute(
+        "SELECT invited_by FROM users WHERE user_id = %s",
+        (user_id,)
+    )
+    row = cur.fetchone()
 
-    if not user_exists:
+    if not row:
+        # пользователь новый → создаём
         cur.execute(
             """
             INSERT INTO users (user_id, username, invited_by)
@@ -169,6 +172,20 @@ async def start_handler(message: types.Message):
             """,
             (user_id, message.from_user.username, referrer_id)
         )
+    else:
+        # пользователь уже есть
+        invited_by_db = row[0]
+
+        # если его ещё никто не приглашал — записываем реферера
+        if invited_by_db is None and referrer_id and referrer_id != user_id:
+            cur.execute(
+                """
+                UPDATE users
+                SET invited_by = %s
+                WHERE user_id = %s
+                """,
+                (referrer_id, user_id)
+            )
 
     conn.commit()
     conn.close()
