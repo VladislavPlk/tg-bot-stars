@@ -37,13 +37,21 @@ def init_db():
     cur = conn.cursor()
 
     cur.execute('''CREATE TABLE IF NOT EXISTS users (
-        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-        user_id BIGINT,
-        username TEXT,
-        balance INTEGER DEFAULT 0,
-        referrals INTEGER DEFAULT 0,
-        invited_by INTEGER DEFAULT NULL
-    )''')
+            id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            user_id BIGINT,
+            username TEXT,
+            balance INTEGER DEFAULT 0,
+            referrals INTEGER DEFAULT 0,
+            invited_by INTEGER DEFAULT NULL
+        )''')
+
+    cur.execute('''CREATE TABLE IF NOT EXISTS referral_rewards (
+            id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            referred_user_id BIGINT NOT NULL,
+            referrer_user_id BIGINT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (referred_user_id, referrer_user_id)
+        )''')
 
     cur.execute('''CREATE TABLE IF NOT EXISTS withdrawals (
         id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -233,35 +241,53 @@ async def try_count_referral(user_id: int):
     conn = get_conn()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT invited_by, referral_counted
-        FROM users
-        WHERE user_id = %s
-    """, (user_id,))
+    cur.execute(
+        "SELECT invited_by FROM users WHERE user_id = %s",
+        (user_id,)
+    )
     row = cur.fetchone()
 
     if not row:
         conn.close()
         return
 
-    invited_by, counted = row
+    referrer_id = row[0]
+    visited = {user_id}
 
-    if invited_by and not counted and invited_by != user_id:
-        cur.execute("""
-            UPDATE users
-            SET balance = balance + %s,
-                referrals = referrals + 1
-            WHERE user_id = %s
-        """, (REFERRAL_REWARD, invited_by))
+    while referrer_id and referrer_id not in visited:
+        visited.add(referrer_id)
+        cur.execute(
+            """
+            INSERT INTO referral_rewards (referred_user_id, referrer_user_id)
+            VALUES (%s, %s)
+            ON CONFLICT DO NOTHING
+            RETURNING id
+            """,
+            (user_id, referrer_id)
+        )
+        inserted = cur.fetchone()
 
-        cur.execute("""
-            UPDATE users
-            SET referral_counted = TRUE
-            WHERE user_id = %s
-        """, (user_id,))
+        if inserted:
+            cur.execute(
+                """
+                UPDATE users
+                SET balance = balance + %s,
+                    referrals = referrals + 1
+                WHERE user_id = %s
+                """,
+                (REFERRAL_REWARD, referrer_id)
+            )
 
-        conn.commit()
+        cur.execute(
+            "SELECT invited_by FROM users WHERE user_id = %s",
+            (referrer_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            break
+        referrer_id = row[0]
 
+    conn.commit()
     conn.close()
 
 
